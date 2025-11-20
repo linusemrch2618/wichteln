@@ -1,0 +1,9 @@
+services:
+  wichteln:
+    image: php:alpine
+    container_name: wichteln
+    restart: unless-stopped
+    ports:
+      - 80:80
+    volumes:
+      - ./src:/var/www/html
