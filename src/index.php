@@ -95,7 +95,7 @@ $isSetupMode = !file_exists($dataFile);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wichteln 2025</title>
+    <title>Wichteln</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@400;700&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
     <link rel="icon" href="gift.png">
