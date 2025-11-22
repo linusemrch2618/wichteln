@@ -1,4 +1,8 @@
 <?php
+/**
+ * Wichtel-Web-App (Single File Lösung)
+ * Mit Anti-Cheat Sicherheitsmechanismus
+ */
 
 session_start();
 
@@ -7,6 +11,11 @@ $dataFile = 'wichtel_data.json';
 $message = '';
 $msgType = ''; // 'error' oder 'success'
 $resultName = '';
+
+// Helper für Kleinbuchstaben (UTF-8 sicher)
+function normalize_name($str) {
+    return function_exists('mb_strtolower') ? mb_strtolower(trim($str)) : strtolower(trim($str));
+}
 
 // --- LOGIK: SETUP (PAARUNGEN ERSTELLEN) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'setup') {
@@ -34,9 +43,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 // Der Beschenkte ist der Nächste in der Liste (der Letzte schenkt dem Ersten)
                 $receiver = $names[($i + 1) % $count];
                 
-                // Wir speichern Keys in Kleinbuchstaben für einfacheren Vergleich
-                // Fallback, falls mb_strtolower nicht existiert
-                $key = function_exists('mb_strtolower') ? mb_strtolower($giver) : strtolower($giver);
+                $key = normalize_name($giver);
                 $pairs[$key] = [
                     'giver_display' => $giver,
                     'receiver' => $receiver
@@ -45,6 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
             // Speichern
             if (file_put_contents($dataFile, json_encode($pairs))) {
+                // Session resetten, damit der Admin sich danach selbst suchen kann
+                if(isset($_SESSION['wichtel_lock'])) unset($_SESSION['wichtel_lock']);
                 $message = "Die Wichtel wurden erfolgreich ausgelost! Jetzt kann jeder seinen Namen eingeben.";
                 $msgType = 'success';
             } else {
@@ -60,6 +69,8 @@ if (isset($_GET['reset']) && $_GET['reset'] === '1') {
     if (file_exists($dataFile)) {
         unlink($dataFile);
     }
+    // WICHTIG: Auch die Session zerstören, damit der Browser wieder frei ist
+    session_destroy();
     header("Location: " . $_SERVER['PHP_SELF']);
     exit;
 }
@@ -69,16 +80,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if (file_exists($dataFile)) {
         $pairs = json_decode(file_get_contents($dataFile), true);
         $myName = trim($_POST['my_name']);
-        
-        // Fallback, falls mb_strtolower nicht existiert
-        $searchKey = function_exists('mb_strtolower') ? mb_strtolower($myName) : strtolower($myName);
+        $searchKey = normalize_name($myName);
 
-        if (array_key_exists($searchKey, $pairs)) {
-            $resultName = $pairs[$searchKey]['receiver'];
-            $giverRealName = $pairs[$searchKey]['giver_display']; // Der Name in korrekter Groß-/Kleinschreibung
-        } else {
-            $message = "Dieser Name wurde nicht auf der Liste gefunden. Tippfehler?";
+        // --- SICHERHEITS-CHECK START ---
+        // Prüfen, ob dieser Browser schon an einen anderen Namen gebunden ist
+        if (isset($_SESSION['wichtel_lock']) && $_SESSION['wichtel_lock'] !== $searchKey) {
+            $message = "⛔ STOP! Du hast bereits abgefragt. Aus Sicherheitsgründen ist dieser Browser nun an den ursprünglichen Namen gebunden.";
             $msgType = 'error';
+        } 
+        // --- SICHERHEITS-CHECK ENDE ---
+        else {
+            if (array_key_exists($searchKey, $pairs)) {
+                // ERFOLG: Lock setzen!
+                $_SESSION['wichtel_lock'] = $searchKey;
+
+                $resultName = $pairs[$searchKey]['receiver'];
+                $giverRealName = $pairs[$searchKey]['giver_display']; 
+            } else {
+                $message = "Dieser Name wurde nicht auf der Liste gefunden. Tippfehler?";
+                $msgType = 'error';
+            }
         }
     } else {
         $message = "Keine Wichtel-Daten gefunden. Bitte Setup durchführen.";
@@ -88,6 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 
 // --- STATUS PRÜFEN ---
 $isSetupMode = !file_exists($dataFile);
+// Name aus Session holen für Pre-Fill
+$lockedName = isset($_SESSION['wichtel_lock']) ? $_SESSION['wichtel_lock'] : null;
 
 ?>
 <!DOCTYPE html>
@@ -137,11 +160,9 @@ $isSetupMode = !file_exists($dataFile);
 </head>
 <body class="min-h-dvh flex items-center justify-center p-4">
 
-    <!-- Schneefall Effekt -->
     <div class="snow-container" id="snow"></div>
 
     <div class="card max-w-md w-full bg-white rounded-xl overflow-hidden border-4 border-red-700 relative">
-        <!-- Dekorative Header Leiste -->
         <div class="bg-red-700 p-4 text-center relative">
             <div class="absolute top-0 left-0 w-full h-2 bg-white opacity-20 bg-stripes"></div>
             <h1 class="text-4xl text-white font-bold christmas-font tracking-wider drop-shadow-md">
@@ -150,7 +171,6 @@ $isSetupMode = !file_exists($dataFile);
         </div>
 
         <div class="p-8">
-            <!-- NACHRICHTEN ANZEIGE -->
             <?php if ($message): ?>
                 <div class="mb-6 p-4 rounded-lg text-center border-2 <?php echo $msgType === 'error' ? 'bg-red-100 border-red-400 text-red-800' : 'bg-green-100 border-green-400 text-green-800'; ?>">
                     <?php echo htmlspecialchars($message); ?>
@@ -158,7 +178,6 @@ $isSetupMode = !file_exists($dataFile);
             <?php endif; ?>
 
             <?php if ($resultName): ?>
-                <!-- ERGEBNIS ANZEIGE -->
                 <div class="text-center animate-pulse mb-6">
                     <p class="text-gray-600 text-lg mb-2">Hallo <span class="font-bold text-red-700"><?php echo htmlspecialchars($giverRealName); ?></span>!</p>
                     <p class="text-xl font-medium mb-4">Du musst folgende Person beschenken:</p>
@@ -171,7 +190,6 @@ $isSetupMode = !file_exists($dataFile);
                 </div>
 
             <?php elseif ($isSetupMode): ?>
-                <!-- SETUP MODUS -->
                 <div class="text-center mb-6">
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Einrichtung</h2>
                     <p class="text-gray-600 text-sm mb-4">Erstelle hier die Liste aller Teilnehmer. Die App lost automatisch aus.</p>
@@ -198,10 +216,15 @@ $isSetupMode = !file_exists($dataFile);
                 </form>
 
             <?php else: ?>
-                <!-- ABFRAGE MODUS -->
                 <div class="text-center mb-6">
                     <h2 class="text-2xl font-bold text-gray-800 mb-2">Wen habe ich?</h2>
-                    <p class="text-gray-600 mb-4">Gib deinen Namen ein, um dein Los zu sehen.</p>
+                    <?php if ($lockedName): ?>
+                        <p class="text-red-600 text-sm font-bold bg-red-50 p-2 rounded border border-red-200 inline-block">
+                            🔒 Du hast deinen Namen bereits eingegeben.
+                        </p>
+                    <?php else: ?>
+                        <p class="text-gray-600 mb-4">Gib deinen Namen ein, um dein Los zu sehen.</p>
+                    <?php endif; ?>
                 </div>
 
                 <form method="POST" action="" class="space-y-6">
@@ -214,26 +237,21 @@ $isSetupMode = !file_exists($dataFile);
                             type="text" 
                             id="my_name" 
                             name="my_name" 
-                            class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-green-600 focus:ring-green-600 outline-none text-center text-lg"
+                            class="w-full p-3 border-2 border-gray-300 rounded-lg outline-none text-center text-lg <?php echo $lockedName ? 'bg-gray-100 text-gray-500 cursor-not-allowed focus:border-gray-300' : 'focus:border-green-600 focus:ring-green-600'; ?>"
                             placeholder="Vorname (kein Spitzname)"
-                            required>
+                            value="<?php echo $lockedName ? ucfirst($lockedName) : (isset($_POST['my_name']) ? htmlspecialchars($_POST['my_name']) : ''); ?>"
+                            <?php echo $lockedName ? 'readonly' : 'required'; ?>>
                     </div>
                     <button type="submit" class="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform transition hover:scale-[1.02] active:scale-95">
-                        Wichtel anzeigen 🎅
+                        <?php echo $lockedName ? 'Wichtel erneut anzeigen 🎅' : 'Wichtel anzeigen 🎅'; ?>
                     </button>
                 </form>
 
-                <!--<div class="mt-8 pt-4 border-t border-gray-200 text-center">
-                    <a href="?reset=1" class="text-xs text-gray-400 hover:text-red-500 transition" onclick="return confirm('Wirklich alles zurücksetzen? Die aktuellen Paarungen werden gelöscht!');">
-                        Alles zurücksetzen (Admin)
-                    </a>
-                </div>-->
-            <?php endif; ?>
+                <?php endif; ?>
         </div>
         
-        <!-- Footer -->
         <div class="bg-gray-50 p-3 text-center text-xs text-gray-400 border-t">
-            Wir sehen uns am 16.12.! 🎄
+            Frohe Weihnachten! 🎄
         </div>
     </div>
 
